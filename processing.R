@@ -1,6 +1,8 @@
 library(tidyverse)
 library(readxl)
 library(janitor)
+install.packages("usethis")
+usethis::use_github(private = TRUE)
 
 read_county <- function(path) {
   peek    <- read_excel(path, col_names = FALSE, n_max = 40,
