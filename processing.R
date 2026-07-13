@@ -1,8 +1,6 @@
 library(tidyverse)
 library(readxl)
 library(janitor)
-install.packages("usethis")
-usethis::use_github(private = TRUE)
 
 read_county <- function(path) {
   peek    <- read_excel(path, col_names = FALSE, n_max = 40,
@@ -25,9 +23,31 @@ all_counties <- all_counties |>
     question = str_remove(demographic, ":+\\s*[^:]*$") |> str_squish()
   )
 
-count(all_counties, question, sort = TRUE) |> print(n = 40)
-distinct(all_counties, answer) |> print(n = 60)
+# Onto the specifics
 
-glimpse(all_counties)
-count(all_counties, county)
+# Rectify the mixup in Mitchell County
+all_counties <- all_counties |>
+  mutate(
+    tmp               = household_members,
+    household_members = if_else(county == "mitchell", case_count, household_members),
+    case_count        = if_else(county == "mitchell", tmp, case_count),
+    household_count   = if_else(county == "mitchell", tmp, household_count)
+  ) |>
+  select(-tmp)
 
+# Graphing
+
+
+household_size <- all_counties |>
+  filter(str_detect(question, "^Case Summary/Narrative")) |>
+  mutate(mean_hh_size = household_members / household_count)
+
+ggplot(household_size, aes(x = county, y = mean_hh_size)) +
+  geom_col(fill = "steelblue") +
+  geom_text(aes(label = round(mean_hh_size, 2)), vjust = -0.4) +
+  labs(
+    title = "Mean household size by county",
+    subtitle = "Cases with completed narratives; Helene DR-4827 caseload",
+    x = NULL, y = "Household members per household"
+  ) +
+  theme_minimal()
