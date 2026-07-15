@@ -1,12 +1,20 @@
 library(tidyverse)
 library(readxl)
 library(janitor)
+library(patchwork)
+dir.create("output", showWarnings = FALSE)
 
 read_county <- function(path) {
   peek    <- read_excel(path, col_names = FALSE, n_max = 40,
                         .name_repair = "minimal")
   hdr_row <- which(peek[[1]] == "Demographic")[1]
   read_excel(path, skip = hdr_row - 1) |> clean_names()
+}
+
+show_and_save <- function(plot, name, w = 7, h = 4.5) {
+  print(plot)
+  ggsave(file.path("output", paste0(name, ".png")), plot,
+         width = w, height = h, dpi = 300)
 }
 
 files <- list.files("data-raw", pattern = "\\.xlsx$", full.names = TRUE)
@@ -35,19 +43,73 @@ all_counties <- all_counties |>
   ) |>
   select(-tmp)
 
-# Graphing
+# --- Validation: counts should not exceed household members ------
 
+# Soft check: report suspicious rows, but don't halt.
+# Rows where members are POSITIVE yet still below counts are the
+# red flags (members == 0 is the known sparse-roster issue instead).
+suspect_rows <- all_counties |>
+  filter(household_members > 0,
+         household_members < pmax(household_count, case_count)) |>
+  select(county, question, answer,
+         case_count, household_count, household_members)
+
+if (nrow(suspect_rows) > 0) {
+  warning(nrow(suspect_rows), " row(s) have counts exceeding household members:")
+  print(suspect_rows)
+}
+
+# Hard check: at the county level, total members must be at least
+# total households — a violation here means a column swap.
+county_totals <- all_counties |>
+  group_by(county) |>
+  summarise(members = sum(household_members), counts = sum(household_count))
+
+stopifnot("Column swap suspected: members < counts in some county" =
+            all(county_totals$members >= county_totals$counts))
+
+# Graphing
 
 household_size <- all_counties |>
   filter(str_detect(question, "^Case Summary/Narrative")) |>
   mutate(mean_hh_size = household_members / household_count)
 
-ggplot(household_size, aes(x = county, y = mean_hh_size)) +
+p_size <- ggplot(household_size, aes(x = str_to_title(county), y = mean_hh_size)) +
   geom_col(fill = "steelblue") +
   geom_text(aes(label = round(mean_hh_size, 2)), vjust = -0.4) +
-  labs(
-    title = "Mean household size by county",
-    subtitle = "Cases with completed narratives; Helene DR-4827 caseload",
-    x = NULL, y = "Household members per household"
-  ) +
+  labs(title = "Mean household size by county",
+       subtitle = "Cases with completed narratives",
+       x = NULL, y = "Members per household") +
   theme_minimal()
+
+show_and_save(p_size, "household_size")
+
+housing <- all_counties |>
+  filter(question == "Status of Current Housing by Household") |>
+  group_by(county, answer) |>
+  slice_head(n = 1) |>    # TEMP: duplicate "Other" row (form-version issue)
+  ungroup() |>
+  mutate(answer = fct_relevel(answer, "Habitable", "Partially Habitable",
+                              "Uninhabitable", "Other"))
+
+p_housing <- ggplot(housing, aes(x = str_to_title(county), y = case_count, fill = answer)) +
+  geom_col(position = "fill", color = "white") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_manual(values = c(
+    "Habitable"           = "#4a9c5d",
+    "Partially Habitable" = "#e8b93e",
+    "Uninhabitable"       = "#c0392b",
+    "Other"               = "grey70"
+  )) +
+  labs(title = "Status of Current Housing",
+       subtitle = "Share of cases per county (gaps may reflect survey coverage)",
+       x = NULL, y = NULL, fill = NULL) +
+  theme_minimal()
+
+show_and_save(p_housing, "housing_status")
+
+ggsave("output/summary_figures.png", combined, width = 8, height = 9, dpi = 300)
+
+show_and_save(combined, "summary_figures", w = 8, h = 9)
+
+print(combined)
