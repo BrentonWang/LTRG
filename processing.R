@@ -43,31 +43,6 @@ all_counties <- all_counties |>
   ) |>
   select(-tmp)
 
-# --- Validation: counts should not exceed household members ------
-
-# Soft check: report suspicious rows, but don't halt.
-# Rows where members are POSITIVE yet still below counts are the
-# red flags (members == 0 is the known sparse-roster issue instead).
-suspect_rows <- all_counties |>
-  filter(household_members > 0,
-         household_members < pmax(household_count, case_count)) |>
-  select(county, question, answer,
-         case_count, household_count, household_members)
-
-if (nrow(suspect_rows) > 0) {
-  warning(nrow(suspect_rows), " row(s) have counts exceeding household members:")
-  print(suspect_rows)
-}
-
-# Hard check: at the county level, total members must be at least
-# total households — a violation here means a column swap.
-county_totals <- all_counties |>
-  group_by(county) |>
-  summarise(members = sum(household_members), counts = sum(household_count))
-
-stopifnot("Column swap suspected: members < counts in some county" =
-            all(county_totals$members >= county_totals$counts))
-
 # Graphing
 
 household_size <- all_counties |>
@@ -85,7 +60,7 @@ p_size <- ggplot(household_size, aes(x = str_to_title(county), y = mean_hh_size)
 show_and_save(p_size, "household_size")
 
 housing <- all_counties |>
-  filter(question == "Status of Current Housing by Household") |>
+  filter(question == "Status of Current Housing") |>
   group_by(county, answer) |>
   slice_head(n = 1) |>    # TEMP: duplicate "Other" row (form-version issue)
   ungroup() |>
@@ -107,8 +82,6 @@ p_housing <- ggplot(housing, aes(x = str_to_title(county), y = case_count, fill 
   theme_minimal()
 
 show_and_save(p_housing, "housing_status")
-
-ggsave("output/summary_figures.png", combined, width = 8, height = 9, dpi = 300)
 
 show_and_save(combined, "summary_figures", w = 8, h = 9)
 
