@@ -43,6 +43,36 @@ all_counties <- all_counties |>
   ) |>
   select(-tmp)
 
+# --- Flag: household counts exceeding household members (read-only) ---
+local({
+  flagged <- all_counties |>
+    filter(household_count > household_members) |>
+    select(county, question, answer,
+           household_count, household_members)
+  
+  if (nrow(flagged) > 0) {
+    cat("FLAG:", nrow(flagged),
+        "row(s) where household_count > household_members\n")
+    print(flagged, n = 20)
+  } else {
+    cat("OK: no rows with household_count > household_members\n")
+  }
+  
+  county_bad <- all_counties |>
+    group_by(county) |>
+    summarise(all_bad = all(household_count > household_members |
+                              household_count == 0),
+              .groups = "drop") |>
+    filter(all_bad)
+  
+  if (nrow(county_bad) > 0) {
+    cat("\n*** BIG FLAG: entire county violates the rule:",
+        paste(county_bad$county, collapse = ", "),
+        "- likely column swap ***\n")
+  }
+})
+
+
 # Graphing
 
 household_size <- all_counties |>
